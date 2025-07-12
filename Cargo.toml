@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serenity = { version = "0.11", features = ["framework", "client", "standard_framework", "gateway", "rustls_backend"] }
+sysinfo = "0.30"
+dotenvy = "0.15"
