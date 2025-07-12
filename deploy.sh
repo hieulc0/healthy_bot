@@ -10,7 +10,7 @@ ssh "$SSH_SERVER" "mkdir -p $TARGET_DIR"
 scp .env "$SSH_SERVER:$TARGET_DIR/.env"
 
 # 🚀 SSH into the server and deploy
-ssh "$SSH_SERVER" bash <<EOF
+ssh "$SSH_SERVER" ash <<EOF
 if [ -d "$TARGET_DIR/.git" ]; then
     echo "✅ Repo already exists at $TARGET_DIR"
 else
