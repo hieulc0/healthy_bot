@@ -353,10 +353,11 @@ async fn my_help(
 
 async fn battery_notify_task(ctx: std::sync::Arc<CacheAndHttp>, channel_id: u64) {
     loop {
-        let battery = fs::read_to_string("/host/sys/class/power_supply/qcom-battery/capacity")
+        let prefix = "/sys/class/power_supply/qcom-battery";
+        let battery = fs::read_to_string(format!("{}/capacity", prefix))
             .ok()
             .and_then(|s| s.trim().parse::<u8>().ok());
-        let status = fs::read_to_string("/host/sys/class/power_supply/qcom-battery/status")
+        let status = fs::read_to_string(format!("{}/status", prefix))
             .unwrap_or("unknown".to_string());
         if let Some(b) = battery {
             if b < 20 {
