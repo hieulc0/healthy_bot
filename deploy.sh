@@ -1,60 +1,71 @@
 #!/bin/bash
 
+set -euo pipefail
+
+# === Config ===
 REPO_URL="git@github.com:hieulc0/healthy_bot.git"
-TARGET_DIR="/home/hieulc/projects/healthy_bot"
+PROJECT_NAME="healthy_bot"
+TARGET_DIR="/home/hieulc/projects/$PROJECT_NAME"
 SSH_SERVER="hieulc@192.168.2.156"
-IMAGE="healthy_bot:arm64"
+IMAGE="$PROJECT_NAME:arm64"
+ENV_FILE=".env"
 
-# Ensure target directory exists
-ssh "$SSH_SERVER" "mkdir -p $TARGET_DIR"
+echo "🚀 Starting deployment to $SSH_SERVER"
 
-# Send .env file
-scp .env "$SSH_SERVER:$TARGET_DIR/.env"
+# === Step 1: Ensure target directory exists
+ssh "$SSH_SERVER" "mkdir -p '$TARGET_DIR'"
 
-# Run remote deployment
+# === Step 2: Copy .env
+echo "📤 Uploading .env..."
+scp "$ENV_FILE" "$SSH_SERVER:$TARGET_DIR/.env"
+
+# === Step 3: Remote logic
 ssh "$SSH_SERVER" ash <<EOF
-set -e  # Exit on any error
+    set -euo pipefail
 
-if [ -d "$TARGET_DIR/.git" ]; then
-    echo "✅ Repo already exists at $TARGET_DIR"
-else
-    echo "📥 Cloning repo..."
-    rm -rf "$TARGET_DIR"  # ensure clean if non-git folder exists
-    git clone "$REPO_URL" "$TARGET_DIR"
-fi
+    # Clone repo if not present
+    if [ ! -d "$TARGET_DIR/.git" ]; then
+        echo "📥 Cloning repository..."
+        rm -rf "$TARGET_DIR"  # cleanup any conflicting folder
+        git clone "$REPO_URL" "$TARGET_DIR"
+    else
+        echo "✅ Repository already exists."
+    fi
 
-cd "$TARGET_DIR"
+    cd "$TARGET_DIR"
 
-# Only run git commands if we're inside a valid repo
-if [ -d ".git" ]; then
-    echo "🔄 Updating repo..."
+    # Git checkout & pull
+    echo "🔄 Updating repository..."
     git checkout develop
     git pull origin develop
-else
-    echo "❌ Not a git repository: $TARGET_DIR"
-    exit 1
-fi
 
-# Check Dockerfile existence
-if [ ! -f Dockerfile ] && [ ! -f Containerfile ]; then
-    echo "❌ No Dockerfile or Containerfile in $TARGET_DIR"
-    exit 1
-fi
+    # Check Dockerfile/Containerfile exists
+    if [ ! -f Dockerfile ] && [ ! -f Containerfile ]; then
+        echo "❌ No Dockerfile or Containerfile found in $TARGET_DIR"
+        exit 1
+    fi
 
-# Build the image
-echo "🐳 Building image..."
-podman build -t $IMAGE .
+    # Build image
+    echo "🐳 Building image..."
+    podman build -t $IMAGE .
 
-# Stop and remove running container from same image
-CONTAINER_ID=\$(podman ps -q --filter ancestor=$IMAGE)
-if [ -n "\$CONTAINER_ID" ]; then
-    echo "⛔ Stopping existing container..."
-    podman stop \$CONTAINER_ID
-    podman rm \$CONTAINER_ID
-fi
+    # Stop and remove any running containers from this image
+    echo "🛑 Stopping existing containers (if any)..."
+    existing=\$(podman ps -q --filter ancestor=$IMAGE)
+    if [ -n "\$existing" ]; then
+        podman stop \$existing
+        podman rm \$existing
+    fi
 
-# Run new container
-echo "🚀 Starting new container..."
-podman run -d --env-file .env $IMAGE
+    # Run new container
+    echo "🚀 Starting new container..."
+    podman run -d --env-file .env $IMAGE
+
+    # Optional cleanup
+    echo "🧼 Cleaning up unused images..."
+    podman image prune -f
+
+    echo "✅ Remote deployment finished."
 EOF
-echo "Deployment completed successfully!"
+
+echo "✅ Deployment completed successfully!"
