@@ -106,7 +106,7 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
             
             // Just show the interfaces we can read from sysfs
             let mut found_any = false;
-            if let Ok(fs_interfaces) = std::fs::read_dir("/host/sys/class/net") {
+            if let Ok(fs_interfaces) = std::fs::read_dir("/sys/class/net") {
                 for entry in fs_interfaces.flatten() {
                     let iface = entry.file_name().into_string().unwrap_or_default();
                     if iface == "lo" { continue; }
@@ -139,7 +139,7 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
     let re = Regex::new(r"\d+: (?P<iface>\S+)\s+\S+ ([^ ]+ )*inet(6)? (?P<ip>[^ ]+)").unwrap();
 
     // Get interface state and MAC from sysfs if available
-    let sys_prefix = "/host/sys/class/net";
+    let sys_prefix = "/sys/class/net";
     if let Ok(fs_interfaces) = std::fs::read_dir(sys_prefix) {
         for entry in fs_interfaces.flatten() {
             let iface = entry.file_name().into_string().unwrap_or_default();
