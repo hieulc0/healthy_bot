@@ -9,6 +9,7 @@ use sysinfo::System;
 use dotenvy::dotenv;
 use std::{fs, env, time::Duration};
 use tokio::time;
+use std::collections::HashSet;
 
 struct Handler;
 
@@ -124,7 +125,7 @@ async fn main() {
         .expect("Invalid channel ID");
 
     let framework = StandardFramework::new()
-        .configure(|c| c.prefix("!").whitespace(true).prefixes(["/", "!"]))
+.configure(|c| c.prefix("!").with_whitespace(true).prefixes(["/", "!"]))
         .help(&MY_HELP)
         .group(&GENERAL_GROUP);
 
