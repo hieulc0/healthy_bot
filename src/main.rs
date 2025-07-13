@@ -100,9 +100,9 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
     let output = match output {
         Some(out) => out,
         None => {
-            // Fallback: show error but still try to read from /host/sys/class/net
+            // Fallback: show error but still try to read from /sys/class/net
             lines.push(format!("⚠️ Could not execute ip command. Last error: {}", last_error));
-            lines.push("📁 Falling back to reading from /host/sys/class/net...".to_string());
+            lines.push("📁 Falling back to reading from /sys/class/net...".to_string());
             
             // Just show the interfaces we can read from sysfs
             let mut found_any = false;
@@ -110,9 +110,9 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
                 for entry in fs_interfaces.flatten() {
                     let iface = entry.file_name().into_string().unwrap_or_default();
                     if iface == "lo" { continue; }
-                    let mac = std::fs::read_to_string(format!("/host/sys/class/net/{}/address", iface))
+                    let mac = std::fs::read_to_string(format!("/sys/class/net/{}/address", iface))
                         .unwrap_or("unknown".into()).trim().to_string();
-                    let state = std::fs::read_to_string(format!("/host/sys/class/net/{}/operstate", iface))
+                    let state = std::fs::read_to_string(format!("/sys/class/net/{}/operstate", iface))
                         .unwrap_or("unknown".into()).trim().to_string();
                     
                     lines.push(format!("\n🔹 Interface: {}", iface));
@@ -123,7 +123,7 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
             }
             
             if !found_any {
-                lines.push("(no interfaces found in /host/sys/class/net)".to_string());
+                lines.push("(no interfaces found in /sys/class/net)".to_string());
             }
             
             let reply = format!("```\n{}\n```", lines.join("\n"));
@@ -249,9 +249,9 @@ async fn debug(ctx: &Context, msg: &Message) -> CommandResult {
         }
     }
     
-    // Check /host/sys/class/net
-    lines.push("\n🌐 Network interfaces in /host/sys/class/net:".to_string());
-    match std::fs::read_dir("/host/sys/class/net") {
+    // Check /sys/class/net
+    lines.push("\n🌐 Network interfaces in /sys/class/net:".to_string());
+    match std::fs::read_dir("/sys/class/net") {
         Ok(entries) => {
             for entry in entries.flatten() {
                 let name = entry.file_name().into_string().unwrap_or_default();
@@ -259,7 +259,7 @@ async fn debug(ctx: &Context, msg: &Message) -> CommandResult {
             }
         }
         Err(e) => {
-            lines.push(format!("   ❌ Error reading /host/sys/class/net: {}", e));
+            lines.push(format!("   ❌ Error reading /sys/class/net: {}", e));
         }
     }
     
