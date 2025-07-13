@@ -35,36 +35,36 @@ struct General;
 
 #[command]
 async fn battery(ctx: &Context, msg: &Message) -> CommandResult {
-    fn read_file(path: &str) -> Option<String> {
-        std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
-    }
+    use std::fs;
 
-    let path_prefix = "/host/sys/class/power_supply/qcom-battery";
+    let prefix = "/host/sys/class/power_supply/qcom-battery";
+    let battery = fs::read_to_string(format!("{}/capacity", prefix)).unwrap_or_else(|_| "unknown".into());
+    let status = fs::read_to_string(format!("{}/status", prefix)).unwrap_or_else(|_| "unknown".into());
 
-    let battery = read_file(&format!("{}/capacity", path_prefix)).unwrap_or("unknown".to_string());
-    let status = read_file(&format!("{}/status", path_prefix)).unwrap_or("unknown".to_string());
-
-    let voltage = match read_file(&format!("{}/voltage_now", path_prefix)) {
-        Some(ref s) if !s.is_empty() => match s.parse::<f64>() {
+    let voltage = match fs::read_to_string(format!("{}/voltage_now", prefix)) {
+        Ok(s) => match s.trim().parse::<f64>() {
             Ok(val) => format!("{:.2} V", val / 1_000_000.0),
-            Err(_) => "unknown".to_string(),
+            _ => "unknown".to_string(),
         },
         _ => "unknown".to_string(),
     };
 
-    let current = match read_file(&format!("{}/current_now", path_prefix)) {
-        Some(ref s) if !s.is_empty() => match s.parse::<f64>() {
+    let current = match fs::read_to_string(format!("{}/current_now", prefix)) {
+        Ok(s) => match s.trim().parse::<f64>() {
             Ok(val) => format!("{:.2} A", val / 1_000_000.0),
-            Err(_) => "unknown".to_string(),
+            _ => "unknown".to_string(),
         },
         _ => "unknown".to_string(),
     };
 
     let reply = format!(
-        "🔋 **Battery Info**\nPercent: {}%\nStatus:  {}\nVoltage: {}\nCurrent: {}",
-        battery, status, voltage, current
+        "Battery: {}%\nStatus:  {}\nVoltage: {}\nCurrent: {}",
+        battery.trim(),
+        status.trim(),
+        voltage,
+        current
     );
-    msg.reply(ctx, reply).await?;
+    msg.reply(ctx, format!("```{}```", reply)).await?;
     Ok(())
 }
 
