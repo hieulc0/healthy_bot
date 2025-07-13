@@ -385,7 +385,7 @@ async fn main() {
         .expect("Invalid channel ID");
 
     let framework = StandardFramework::new()
-.configure(|c| c.prefix("!").with_whitespace(true).prefixes(["/", "!"]))
+        .configure(|c| c.prefix("!").with_whitespace(true).prefixes(["/", "!"]))
         .help(&MY_HELP)
         .group(&GENERAL_GROUP);
 
@@ -393,10 +393,10 @@ async fn main() {
         &token,
         serenity::model::gateway::GatewayIntents::GUILD_MESSAGES | serenity::model::gateway::GatewayIntents::MESSAGE_CONTENT,
     )
-    .event_handler(Handler)
-    .framework(framework)
-    .await
-    .expect("Client creation failed");
+        .event_handler(Handler)
+        .framework(framework)
+        .await
+        .expect("Client creation failed");
 
     // Start battery notifier
     let ctx = client.cache_and_http.clone();
