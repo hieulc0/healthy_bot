@@ -64,6 +64,8 @@ ssh "$SSH_SERVER" ash <<EOF
       -v /sys/class/power_supply:/host/sys/class/power_supply:ro \
       -v /sys/class/net:/host/sys/class/net:ro \
       -v /proc/net/fib_trie:/host/proc/net/fib_trie:ro \
+      -v /proc/net/if_inet6:/host/proc/net/if_inet6:ro \
+      --privileged \
       $IMAGE
 
     # Optional cleanup

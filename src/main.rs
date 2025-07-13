@@ -71,62 +71,68 @@ async fn battery(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[aliases("ip")]
 async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
-    use std::fs;
+    use std::process::Command;
     use regex::Regex;
 
-    let sys_prefix = "/host/sys/class/net";
-    let mut lines = vec!["==== Network Interfaces ====".to_string()];
+    let mut lines = vec!["==== Network Interfaces (via ip addr) ====".to_string()];
 
-    let interfaces = match fs::read_dir(sys_prefix) {
-        Ok(it) => it,
-        Err(_) => return {
-            msg.reply(ctx, "Could not read network interfaces!").await?;
-            Ok(())
-        },
+    // Run `ip -o addr` (each line is one address for one interface)
+    let output = Command::new("ip").arg("-o").arg("addr").output();
+    let output = match output {
+        Ok(out) if out.status.success() => out,
+        _ => {
+            msg.reply(ctx, "Failed to run 'ip addr' in container").await?;
+            return Ok(());
+        }
     };
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    for entry in interfaces {
-        if let Ok(entry) = entry {
+    // Map from interface name to (state, MAC, Vec<ip4>, Vec<ip6>)
+    use std::collections::BTreeMap;
+    let mut ifaces: BTreeMap<String, (String, String, Vec<String>, Vec<String>)> = BTreeMap::new();
+    let re = Regex::new(r"\d+: (?P<iface>\S+)\s+\S+ ([^ ]+ )*inet(6)? (?P<ip>[^ ]+)").unwrap();
+
+    // Get interface state and MAC from sysfs if available
+    let sys_prefix = "/host/sys/class/net";
+    if let Ok(fs_interfaces) = std::fs::read_dir(sys_prefix) {
+        for entry in fs_interfaces.flatten() {
             let iface = entry.file_name().into_string().unwrap_or_default();
             if iface == "lo" { continue; }
+            let mac = std::fs::read_to_string(format!("{}/{}/address", sys_prefix, iface)).unwrap_or("unknown".into()).trim().to_string();
+            let state = std::fs::read_to_string(format!("{}/{}/operstate", sys_prefix, iface)).unwrap_or("unknown".into()).trim().to_string();
+            ifaces.entry(iface).or_insert((state, mac, vec![], vec![]));
+        }
+    }
 
-            let mac = fs::read_to_string(format!("{}/{}/address", sys_prefix, iface)).unwrap_or("unknown".into()).trim().to_string();
-            let state = fs::read_to_string(format!("{}/{}/operstate", sys_prefix, iface)).unwrap_or("unknown".into()).trim().to_string();
-
-            // IPv4
-            let mut ipv4_str = String::new();
-            if let Ok(ipv4_out) = fs::read_to_string("/host/proc/net/fib_trie") {
-                let ipv4_re = Regex::new(&format!(r"32 host (\d+\.\d+\.\d+\.\d+).*[\n\r]+.*{}$", iface)).unwrap();
-                for cap in ipv4_re.captures_iter(&ipv4_out) {
-                    ipv4_str = cap[1].to_string();
-                }
-            }
-
-            // IPv6
-            let mut ipv6_str = String::new();
-            if let Ok(ipv6_out) = fs::read_to_string("/host/proc/net/if_inet6") {
-                for line in ipv6_out.lines() {
-                    let cols: Vec<_> = line.split_whitespace().collect();
-                    if cols.len() == 6 && cols[5] == iface {
-                        let v6raw = &cols[0];
-                        let ipv6 = (0..8).map(|i| &v6raw[i*4..i*4+4]).collect::<Vec<_>>().join(":");
-                        ipv6_str = ipv6;
-                    }
-                }
-            }
-
-            lines.push(format!("\n🔹 Interface: {iface}"));
-            lines.push(format!("   ├─ State     : {state}"));
-            lines.push(format!("   ├─ MAC       : {mac}"));
-            if !ipv4_str.is_empty() {
-                lines.push(format!("   ├─ IPv4      : {ipv4_str}"));
-            }
-            if !ipv6_str.is_empty() {
-                lines.push(format!("   └─ IPv6      : {ipv6_str}"));
+    // Parse `ip -o addr` output
+    for line in stdout.lines() {
+        if let Some(cap) = re.captures(line) {
+            let iface = cap.name("iface").unwrap().as_str().to_string();
+            let ip = cap.name("ip").unwrap().as_str().to_string();
+            let is_v6 = line.contains("inet6");
+            let entry = ifaces.entry(iface.clone()).or_insert(("?".into(), "?".into(), vec![], vec![]));
+            if is_v6 {
+                entry.3.push(ip);
+            } else {
+                entry.2.push(ip);
             }
         }
     }
 
+    if ifaces.is_empty() {
+        lines.push("(no interfaces found)".to_string());
+    }
+    for (iface, (state, mac, ip4s, ip6s)) in ifaces {
+        lines.push(format!("\n🔹 Interface: {iface}"));
+        lines.push(format!("   ├─ State     : {state}"));
+        lines.push(format!("   ├─ MAC       : {mac}"));
+        for ip in ip4s {
+            lines.push(format!("   ├─ IPv4      : {ip}"));
+        }
+        for ip in ip6s {
+            lines.push(format!("   └─ IPv6      : {ip}"));
+        }
+    }
     let reply = format!("```\n{}\n```", lines.join("\n"));
     msg.reply(ctx, &reply).await?;
     Ok(())
