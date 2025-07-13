@@ -59,7 +59,12 @@ ssh "$SSH_SERVER" ash <<EOF
 
     # Run new container
     echo "🚀 Starting new container..."
-    podman run -d --env-file .env $IMAGE
+    podman run -d --env-file .env \
+      --network=host \
+      -v /sys/class/power_supply:/host/sys/class/power_supply:ro \
+      -v /sys/class/net:/host/sys/class/net:ro \
+      -v /proc/net:/host/proc/net:ro \
+      $IMAGE
 
     # Optional cleanup
     echo "🧼 Cleaning up unused images..."
