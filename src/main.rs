@@ -30,7 +30,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(battery, cpu, ram, ip, commands)]
+#[commands(battery, cpu, ram, ip, commands, debug)]
 struct General;
 
 #[command]
@@ -76,12 +76,58 @@ async fn ip(ctx: &Context, msg: &Message) -> CommandResult {
 
     let mut lines = vec!["==== Network Interfaces (via ip addr) ====".to_string()];
 
-    // Run `ip -o addr` (each line is one address for one interface)
-    let output = Command::new("ip").arg("-o").arg("addr").output();
+    // Try to run `ip -o addr` (each line is one address for one interface)
+    let possible_ip_paths = ["/sbin/ip", "/usr/sbin/ip", "/bin/ip", "/usr/bin/ip", "ip"];
+    let mut output = None;
+    let mut last_error = String::new();
+    
+    for ip_path in possible_ip_paths {
+        match Command::new(ip_path).arg("-o").arg("addr").output() {
+            Ok(out) if out.status.success() => {
+                output = Some(out);
+                break;
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                last_error = format!("'{}' failed with exit code: {}\nStderr: {}", ip_path, out.status, stderr);
+            }
+            Err(e) => {
+                last_error = format!("Failed to execute '{}': {}", ip_path, e);
+            }
+        }
+    }
+    
     let output = match output {
-        Ok(out) if out.status.success() => out,
-        _ => {
-            msg.reply(ctx, "Failed to run 'ip addr' in container").await?;
+        Some(out) => out,
+        None => {
+            // Fallback: show error but still try to read from /host/sys/class/net
+            lines.push(format!("⚠️ Could not execute ip command. Last error: {}", last_error));
+            lines.push("📁 Falling back to reading from /host/sys/class/net...".to_string());
+            
+            // Just show the interfaces we can read from sysfs
+            let mut found_any = false;
+            if let Ok(fs_interfaces) = std::fs::read_dir("/host/sys/class/net") {
+                for entry in fs_interfaces.flatten() {
+                    let iface = entry.file_name().into_string().unwrap_or_default();
+                    if iface == "lo" { continue; }
+                    let mac = std::fs::read_to_string(format!("/host/sys/class/net/{}/address", iface))
+                        .unwrap_or("unknown".into()).trim().to_string();
+                    let state = std::fs::read_to_string(format!("/host/sys/class/net/{}/operstate", iface))
+                        .unwrap_or("unknown".into()).trim().to_string();
+                    
+                    lines.push(format!("\n🔹 Interface: {}", iface));
+                    lines.push(format!("   ├─ State     : {}", state));
+                    lines.push(format!("   └─ MAC       : {}", mac));
+                    found_any = true;
+                }
+            }
+            
+            if !found_any {
+                lines.push("(no interfaces found in /host/sys/class/net)".to_string());
+            }
+            
+            let reply = format!("```\n{}\n```", lines.join("\n"));
+            msg.reply(ctx, &reply).await?;
             return Ok(());
         }
     };
@@ -160,6 +206,83 @@ async fn ram(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
+async fn debug(ctx: &Context, msg: &Message) -> CommandResult {
+    use std::process::Command;
+    
+    let mut lines = vec!["🔍 Debug Information".to_string()];
+    
+    // Check PATH
+    if let Ok(path) = std::env::var("PATH") {
+        lines.push(format!("\n📁 PATH: {}", path));
+    }
+    
+    // Check if ip command exists at various locations
+    let possible_paths = ["/sbin/ip", "/usr/sbin/ip", "/bin/ip", "/usr/bin/ip"];
+    lines.push("\n🔍 IP command locations:".to_string());
+    
+    for path in possible_paths {
+        if std::path::Path::new(path).exists() {
+            lines.push(format!("   ✅ {} exists", path));
+            
+            // Try to get version
+            match Command::new(path).arg("--version").output() {
+                Ok(out) if out.status.success() => {
+                    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    lines.push(format!("      Version: {}", version));
+                }
+                Ok(out) => {
+                    lines.push(format!("      Version check failed: exit code {}", out.status));
+                }
+                Err(e) => {
+                    lines.push(format!("      Version check error: {}", e));
+                }
+            }
+        } else {
+            lines.push(format!("   ❌ {} not found", path));
+        }
+    }
+    
+    // Check /host/sys/class/net
+    lines.push("\n🌐 Network interfaces in /host/sys/class/net:".to_string());
+    match std::fs::read_dir("/host/sys/class/net") {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name = entry.file_name().into_string().unwrap_or_default();
+                lines.push(format!("   📡 {}", name));
+            }
+        }
+        Err(e) => {
+            lines.push(format!("   ❌ Error reading /host/sys/class/net: {}", e));
+        }
+    }
+    
+    // Check current user
+    lines.push("\n👤 Process info:".to_string());
+    if let Ok(output) = Command::new("id").output() {
+        if output.status.success() {
+            let id_output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            lines.push(format!("   {}", id_output));
+        }
+    }
+    
+    // Check capabilities (if available)
+    if let Ok(output) = Command::new("cat").arg("/proc/self/status").output() {
+        if output.status.success() {
+            let status = String::from_utf8_lossy(&output.stdout);
+            for line in status.lines() {
+                if line.starts_with("Cap") {
+                    lines.push(format!("   {}", line));
+                }
+            }
+        }
+    }
+    
+    let reply = format!("```\n{}\n```", lines.join("\n"));
+    msg.reply(ctx, &reply).await?;
+    Ok(())
+}
+
+#[command]
 #[aliases("help", "commands")]
 async fn commands(ctx: &Context, msg: &Message) -> CommandResult {
     let help_message: &'static str = "🤖 **Healthy Bot Help**
@@ -174,6 +297,8 @@ Monitor your system resources via Discord! Use the following commands with eithe
   Shows RAM usage in MB (used/total). Example: `/ram`
 - **/ip** or **!ip**
   Lists all host network interfaces, MACs, states, and IPs. Example: `!ip`
+- **/debug** or **!debug**
+  Shows debugging information about the bot environment and available commands. Example: `!debug`
 - **/commands**, **!commands**, **/help**, or **!help**
   Shows this help message.
 
